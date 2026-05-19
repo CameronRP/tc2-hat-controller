@@ -253,7 +253,8 @@ func checkATtinySignalLoop(a *attiny) {
 	pinName := "GPIO16" //TODO add pin to config
 	pin := gpioreg.ByName(pinName)
 	if pin == nil {
-		log.Printf("Failed to find {%s}", pinName)
+		log.Errorf("Failed to find {%s}", pinName)
+		log.Fatal("Failed to find pin")
 	}
 	pin.In(gpio.PullUp, gpio.FallingEdge)
 	log.Println("Starting check ATtiny signal loop")
@@ -270,10 +271,9 @@ func checkATtinySignalLoop(a *attiny) {
 			}
 			time.Sleep(100 * time.Millisecond)
 		}
-		piCommands, err := a.readPiCommands(true)
+		piCommands, err := a.readPiCommands(false)
 		if err != nil {
-			log.Println("Error reading pi commands:", err)
-			continue
+			log.Error("Error reading pi commands:", err)
 		}
 
 		//TODO Fix bug causing this instead to be triggered twice, error is probably in ATtiny code
@@ -281,10 +281,10 @@ func checkATtinySignalLoop(a *attiny) {
 		if piCommands == 0 {
 			log.Println("No command flags set, writing camera state and connection state.")
 			if err := a.writeCameraState(a.CameraState); err != nil {
-				log.Printf("Error writing camera state: %s", err)
+				log.Errorf("Error writing camera state: %s", err)
 			}
 			if err := a.writeConnectionState(a.ConnectionState); err != nil {
-				log.Printf("Error writing connection state: %s", err)
+				log.Errorf("Error writing connection state: %s", err)
 			}
 		}
 		readFlag := false
@@ -292,7 +292,7 @@ func checkATtinySignalLoop(a *attiny) {
 			readFlag = true
 			log.Println("write camera state flag")
 			if err := a.writeCameraState(a.CameraState); err != nil {
-				log.Printf("Error writing camera state: %s", err)
+				log.Errorf("Error writing camera state: %s", err)
 			}
 		}
 
@@ -323,12 +323,12 @@ func checkATtinySignalLoop(a *attiny) {
 			if serialhelper.SerialInUseFromTerminal() {
 				_, err := exec.Command("disable-aux-uart").CombinedOutput()
 				if err != nil {
-					log.Println("Error disabling aux uart:", err)
+					log.Error("Error disabling aux uart:", err)
 				}
 			} else {
 				_, err := exec.Command("enable-aux-uart").CombinedOutput()
 				if err != nil {
-					log.Println("Error enabling aux uart:", err)
+					log.Error("Error enabling aux uart:", err)
 				}
 			}
 			a.writeAuxState()
@@ -338,10 +338,10 @@ func checkATtinySignalLoop(a *attiny) {
 			readFlag = true
 			log.Println("New boot from attiny, check boot reason and firmware version.")
 			if err := a.readBootReason(); err != nil {
-				log.Println("Error reading boot reason:", err)
+				log.Error("Error reading boot reason:", err)
 			}
 			if err := a.checkFirmwareVersion(); err != nil {
-				log.Println("Error reading firmware version:", err)
+				log.Error("Error reading firmware version:", err)
 			} else {
 				log.Println("ATtiny Running correct firmware version.")
 			}
@@ -349,6 +349,17 @@ func checkATtinySignalLoop(a *attiny) {
 
 		if !readFlag && piCommands != 0 {
 			log.Errorf("Unknown command flag: 0x%x", piCommands)
+		}
+
+		// Clear the commands that we just processed.
+		// We read the current commands so we can just clear the ones that we just processed.
+		newCommands, err := a.readRegister(piCommandsReg)
+		if err != nil {
+			log.Error("Error reading pi commands:", err)
+		}
+		newCommands = newCommands &^ piCommands
+		if err := a.writeRegister(piCommandsReg, newCommands, -1); err != nil {
+			log.Error("Error writing pi commands:", err)
 		}
 
 		time.Sleep(time.Second)
